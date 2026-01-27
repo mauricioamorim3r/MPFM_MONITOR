@@ -1,0 +1,196 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 240 10% 3.9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 240 10% 3.9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 217.2 91.2% 59.8%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 240 3.7% 15.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 217.2 91.2% 59.8%;
+    --radius: 0.5rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-zinc-900;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-zinc-700 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-zinc-600;
+  }
+}
+
+@layer components {
+  /* KPI Card gradient backgrounds */
+  .kpi-card-blue {
+    @apply bg-gradient-to-br from-blue-500/20 to-blue-600/5 border-blue-500/30;
+  }
+
+  .kpi-card-emerald {
+    @apply bg-gradient-to-br from-emerald-500/20 to-emerald-600/5 border-emerald-500/30;
+  }
+
+  .kpi-card-amber {
+    @apply bg-gradient-to-br from-amber-500/20 to-amber-600/5 border-amber-500/30;
+  }
+
+  .kpi-card-red {
+    @apply bg-gradient-to-br from-red-500/20 to-red-600/5 border-red-500/30;
+  }
+
+  .kpi-card-purple {
+    @apply bg-gradient-to-br from-purple-500/20 to-purple-600/5 border-purple-500/30;
+  }
+
+  /* Status badges */
+  .badge-success {
+    @apply bg-emerald-500/20 text-emerald-400 border border-emerald-500/30;
+  }
+
+  .badge-warning {
+    @apply bg-amber-500/20 text-amber-400 border border-amber-500/30;
+  }
+
+  .badge-error {
+    @apply bg-red-500/20 text-red-400 border border-red-500/30;
+  }
+
+  .badge-info {
+    @apply bg-blue-500/20 text-blue-400 border border-blue-500/30;
+  }
+
+  .badge-purple {
+    @apply bg-purple-500/20 text-purple-400 border border-purple-500/30;
+  }
+
+  /* Table styles */
+  .table-header {
+    @apply bg-zinc-800/50 text-zinc-400 text-xs font-medium;
+  }
+
+  .table-row {
+    @apply border-b border-zinc-800/50 hover:bg-zinc-800/30 transition-colors;
+  }
+
+  .table-cell {
+    @apply py-2 px-3 text-sm;
+  }
+
+  /* Input focus styles */
+  .input-focus {
+    @apply focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500;
+  }
+
+  /* Sidebar styles */
+  .sidebar-item {
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-sm;
+  }
+
+  .sidebar-item-active {
+    @apply bg-blue-600 text-white;
+  }
+
+  .sidebar-item-inactive {
+    @apply hover:bg-zinc-800 text-zinc-400 hover:text-white;
+  }
+}
+
+@layer utilities {
+  /* Text utilities for data display */
+  .text-value {
+    @apply font-mono text-sm tabular-nums;
+  }
+
+  .text-label {
+    @apply text-xs text-zinc-500;
+  }
+
+  /* Status colors */
+  .text-status-ok {
+    @apply text-emerald-400;
+  }
+
+  .text-status-alert {
+    @apply text-amber-400;
+  }
+
+  .text-status-fail {
+    @apply text-red-400;
+  }
+
+  /* System colors */
+  .text-subsea {
+    @apply text-blue-400;
+  }
+
+  .text-topside {
+    @apply text-purple-400;
+  }
+
+  .text-separator {
+    @apply text-emerald-400;
+  }
+
+  /* Balance colors based on value */
+  .balance-ok {
+    @apply text-emerald-400;
+  }
+
+  .balance-warning {
+    @apply text-amber-400;
+  }
+
+  .balance-critical {
+    @apply text-red-400;
+  }
+
+  /* Animation utilities */
+  .animate-fade-in {
+    animation: fadeIn 0.3s ease-in-out;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
