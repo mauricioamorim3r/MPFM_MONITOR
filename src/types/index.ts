@@ -186,7 +186,8 @@ export interface TotalizerRow {
   refOilMassPI: number;
   refGas: number;
   refWater: number;
-  status: 'OK' | 'ERROR';
+  refHC?: number;
+  status: 'OK' | 'ERROR' | 'Pendente' | 'Parcial';
 }
 
 export interface CalibrationStep03Data {

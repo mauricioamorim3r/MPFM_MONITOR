@@ -1,0 +1,7 @@
+export { Step01Registro } from './Step01Registro'
+export { Step02PVT } from './Step02PVT'
+export { Step03Totalizadores } from './Step03Totalizadores'
+export { Step04KFactors } from './Step04KFactors'
+export { Step05Balanco } from './Step05Balanco'
+export { Step06Monitoramento } from './Step06Monitoramento'
+export { Step07Alarmes } from './Step07Alarmes'
