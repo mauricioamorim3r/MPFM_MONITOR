@@ -1,3 +1,4 @@
 export { MonitoringPage } from './Monitoring'
 export { CalibrationPage } from './Calibration'
 export { CompliancePage } from './Compliance'
+export { Desenquadramento } from './Desenquadramento'

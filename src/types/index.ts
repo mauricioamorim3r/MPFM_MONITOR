@@ -355,9 +355,12 @@ export interface AppState {
   alerts: Alert[];
   unreadAlertsCount: number;
   
+  // Desenquadramento
+  desenquadramentoEvents: DesenquadramentoEvent[];
+  
   // UI
   sidebarCollapsed: boolean;
-  activeModule: 'monitoring' | 'calibration' | 'compliance';
+  activeModule: 'monitoring' | 'calibration' | 'compliance' | 'desenquadramento';
   
   // Actions
   setUser: (user: AppState['user']) => void;
@@ -365,6 +368,332 @@ export interface AppState {
   setDailyData: (data: MassBalance[]) => void;
   setCalibrationEvents: (events: CalibrationEvent[]) => void;
   setAlerts: (alerts: Alert[]) => void;
+  setDesenquadramentoEvents: (events: DesenquadramentoEvent[]) => void;
   toggleSidebar: () => void;
   setActiveModule: (module: AppState['activeModule']) => void;
+}
+
+// ============================================================================
+// TIPOS DE DESENQUADRAMENTO - RANP 44/2015 Item 10
+// ============================================================================
+
+// Status do evento de desenquadramento
+export type DesenquadramentoStatus = 
+  | 'Aberto' 
+  | 'Em Investigação' 
+  | 'Plano de Ação' 
+  | 'Aguardando Validação'
+  | 'Concluído' 
+  | 'Enviado ANP';
+
+// Tipo de relatório conforme RANP 44
+export type TipoRelatorioANP = 'Parcial' | 'Final';
+
+// Ambiente do equipamento
+export type AmbienteEquipamento = 'TOPSIDE' | 'SUBSEA';
+
+// Condições operacionais no momento da falha
+export interface CondicoesOperacionais {
+  gvf: number;           // Gas Void Fraction (%)
+  bsw: number;           // Basic Sediment and Water (%)
+  salinidade: number;    // Salinidade (mg/L)
+  pressao: number;       // Pressão (bar)
+  temperatura: number;   // Temperatura (°C)
+  vazaoOleo: number;     // Vazão de óleo (m³/d)
+  vazaoGas: number;      // Vazão de gás (MSm³/d)
+  vazaoAgua: number;     // Vazão de água (m³/d)
+  vazaoTotal: number;    // Vazão total (m³/d)
+  dpVenturi?: number;    // Delta P Venturi (mbar)
+}
+
+// Entrada do Diário de Bordo
+export interface DiarioBordoEntry {
+  id: string;
+  eventId: string;
+  dataHora: string;
+  dPlus: number;         // Dias desde o evento (D+0, D+3, D+10...)
+  etapa: string;
+  detalhe: string;
+  proximoPasso?: string;
+  responsavel: string;
+  area: string;
+  evidenciaId?: string;
+  status: 'Pendente' | 'Em Andamento' | 'Concluído';
+  itemRANP?: string;     // Referência ao item da RANP 44
+}
+
+// Dados do diagnóstico
+export interface DiagnosticoData {
+  descricaoFalha: string;
+  causaProvavel: string;
+  fatoDeterminante?: string;
+  fatoresExternos?: string;
+  metodologiaAnalise: 'Ishikawa' | '5 Porquês' | 'FMEA' | 'Outro';
+  analise5Porques?: {
+    porque1: string;
+    porque2: string;
+    porque3: string;
+    porque4: string;
+    porque5: string;
+  };
+  categoriasFalha: {
+    hardware: boolean;
+    pvt: boolean;
+    processo: boolean;
+    comunicacao: boolean;
+    configuracao: boolean;
+    calibracao: boolean;
+    outro: boolean;
+  };
+  conclusaoTecnica: string;
+}
+
+// Dados de contingência
+export interface ContingenciaData {
+  planoAcionado: boolean;
+  medidaMitigadora: string;
+  metodologiaContingencia?: string;
+  dataInicioContingencia?: string;
+  dataFimContingencia?: string;
+  responsavelContingencia: string;
+  efetividadeContingencia?: 'Alta' | 'Média' | 'Baixa';
+}
+
+// Ação Corretiva/Preventiva (CAPA)
+export interface AcaoCAPA {
+  id: string;
+  eventId: string;
+  acao: string;
+  descricao: string;
+  tipo: 'Corretiva' | 'Preventiva';
+  prioridade: 'Baixa' | 'Média' | 'Alta' | 'Crítica';
+  responsavel: string;
+  prazo: string;
+  status: 'Pendente' | 'Em Andamento' | 'Concluído' | 'Cancelado';
+  evidenciaId?: string;
+  criterioEficacia?: string;
+  dataVerificacao?: string;
+  resultadoVerificacao?: string;
+  observacoes?: string;
+}
+
+// Anexo/Evidência
+export interface AnexoEvidencia {
+  id: string;
+  eventId: string;
+  tipo: 'PDF' | 'Imagem' | 'Log' | 'Relatório' | 'Email' | 'Outro';
+  nome: string;
+  descricao: string;
+  origem: string;
+  dataUpload: string;
+  uploadedBy: string;
+  tamanhoBytes: number;
+  url?: string;
+  referenciaDiario?: string;  // ID da entrada do diário relacionada
+}
+
+// Item do checklist ANP
+export interface ChecklistItemANP {
+  id: string;
+  itemRANP: string;           // Ex: "10.4.1.a"
+  descricao: string;
+  obrigatorio: boolean;
+  tipoRelatorio: TipoRelatorioANP[];
+  status: 'Pendente' | 'OK' | 'N/A';
+  campoPreenchido?: string;
+  observacao?: string;
+}
+
+// Evento de Desenquadramento (principal)
+export interface DesenquadramentoEvent {
+  id: string;
+  status: DesenquadramentoStatus;
+  tipoRelatorio: TipoRelatorioANP;
+  ambiente: AmbienteEquipamento;
+  
+  // Identificação
+  equipamentoId: string;
+  equipamentoTag: string;
+  equipamentoNome: string;
+  
+  // Datas importantes
+  dataOcorrencia: string;         // Data do início do desvio
+  dataDeteccao: string;           // Data que foi detectado
+  dataRelatorio: string;          // Data de emissão do relatório
+  dataEnvioANP?: string;          // Data de envio à ANP
+  prazoRelatorioParcial: string;  // D+10
+  prazoRelatorioFinal: string;    // D+30 (topside) ou D+60/90/120 (subsea)
+  prazoReparo: string;            // 60d (topside) ou 120d (subsea)
+  
+  // Responsáveis
+  responsavelTecnico: string;
+  gerenteSGMFM?: string;
+  
+  // Dados do evento
+  condicoesOperacionais: CondicoesOperacionais;
+  diarioBordo: DiarioBordoEntry[];
+  diagnostico?: DiagnosticoData;
+  contingencia?: ContingenciaData;
+  planosAcao: AcaoCAPA[];
+  anexos: AnexoEvidencia[];
+  checklistANP: ChecklistItemANP[];
+  
+  // Controle
+  diasConsecutivosDesvio: number;
+  desvioHC: number;
+  desvioTotal: number;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string;
+}
+
+// ============================================================================
+// TIPOS DE PVT EXPANDIDOS
+// ============================================================================
+
+// Composição molar detalhada
+export interface ComposicaoMolarComponente {
+  componente: string;         // N2, CO2, H2S, C1, C2, C3, iC4, nC4, iC5, nC5, C6, C7, C8, C9, C10+
+  massaMolar: number;         // g/mol
+  molPercent: number;         // % molar original
+  molPercentNormalizado: number;  // % molar normalizado
+}
+
+// Dados PVT completos
+export interface PVTDataCompleto {
+  id: string;
+  reportId: string;
+  tipo: 'AS_FOUND' | 'AS_LEFT';
+  dataAmostragem: string;
+  pontoAmostragem: string;
+  software: string;
+  versao: string;
+  statusAprovacao: 'Pendente' | 'Aprovado' | 'Rejeitado';
+  dataAprovacao?: string;
+  aprovadoPor?: string;
+  
+  // Propriedades de referência
+  propriedadesReferencia: {
+    densidadeOleo: number;      // kg/m³
+    densidadeGas: number;       // kg/m³
+    densidadeAgua: number;      // kg/m³
+    rgo: number;                // Razão Gás-Óleo (Sm³/Sm³)
+    condutividadeAgua: number;  // mS/cm
+    salinidade: number;         // mg/L NaCl
+    fatorEncolhimento: number;  // Bo
+    viscosidadeOleo?: number;   // cP
+    viscosidadeGas?: number;    // cP
+  };
+  
+  // Composição molar
+  composicaoMolar: ComposicaoMolarComponente[];
+  
+  // Fatores Peneloux (correção de volume)
+  fatoresPeneloux: {
+    gas: number;
+    oleo: number;
+  };
+  
+  // Envelope de fases
+  envelopeFases?: {
+    pressaoCritica: number;
+    temperaturaCritica: number;
+    pressaoBolha: number;
+    pressaoOrvalho: number;
+  };
+}
+
+// ============================================================================
+// TIPOS DE RESUMO E AGREGAÇÃO
+// ============================================================================
+
+// Resumo de monitoramento (semanal/mensal)
+export interface MonitoramentoResumo {
+  id: string;
+  periodo: 'diario' | 'semanal' | 'mensal';
+  dataInicio: string;
+  dataFim: string;
+  meterId?: string;
+  meterTag?: string;
+  
+  // Estatísticas
+  diasComDados: number;
+  diasSemDados: number;
+  
+  // Desvio HC
+  mediaDesvioHC: number;
+  maxDesvioHC: number;
+  minDesvioHC: number;
+  diasHCOK: number;
+  diasHCAlerta: number;
+  diasHCFalha: number;
+  
+  // Desvio Total
+  mediaDesvioTotal: number;
+  maxDesvioTotal: number;
+  minDesvioTotal: number;
+  diasTotalOK: number;
+  diasTotalAlerta: number;
+  diasTotalFalha: number;
+  
+  // K-Factors
+  kOilMedio: number;
+  kOilMin: number;
+  kOilMax: number;
+  kGasMedio: number;
+  kGasMin: number;
+  kGasMax: number;
+  kWaterMedio: number;
+  kWaterMin: number;
+  kWaterMax: number;
+  
+  // Dias consecutivos (máximo no período)
+  maxDiasConsecutivosDesvio: number;
+  
+  // Conformidade
+  taxaConformidadeHC: number;   // %
+  taxaConformidadeTotal: number; // %
+}
+
+// Totalização 24h para calibração
+export interface Totalizacao24h {
+  id: string;
+  calibrationEventId: string;
+  dataInicio: string;
+  dataFim: string;
+  
+  // Dados horários
+  dadosHorarios: {
+    hora: number;       // 0-23
+    timestamp: string;
+    massaOleoMPFM: number;
+    massaGasMPFM: number;
+    massaAguaMPFM: number;
+    massaOleoRef: number;
+    massaGasRef: number;
+    massaAguaRef: number;
+  }[];
+  
+  // Totais
+  totalMassaOleoMPFM: number;
+  totalMassaGasMPFM: number;
+  totalMassaAguaMPFM: number;
+  totalMassaOleoRef: number;
+  totalMassaGasRef: number;
+  totalMassaAguaRef: number;
+  
+  // K-Factors calculados
+  kOilCalculado: number;
+  kGasCalculado: number;
+  kWaterCalculado: number;
+  
+  // Desvios
+  desvioOleo: number;
+  desvioGas: number;
+  desvioAgua: number;
+  
+  // Validação
+  duracaoEfetivaHoras: number;
+  isValid: boolean;
+  motivoInvalidacao?: string;
 }

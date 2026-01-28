@@ -11,8 +11,9 @@ import {
   XCircle,
   FileText,
 } from 'lucide-react'
-import { Modal, Button, Badge, Card, Input } from '@/components/ui'
+import { Modal, Button, Badge, Card, Input, useToast } from '@/components/ui'
 import { useAppStore } from '@/store/useAppStore'
+import { useAuditLog } from '@/hooks/useAuditLog'
 import { cn } from '@/utils'
 
 interface DayDetailModalProps {
@@ -25,6 +26,9 @@ export function DayDetailModal({ isOpen, onClose, date }: DayDetailModalProps) {
   const monitoringData = useAppStore((state) => state.monitoringData)
   const updateMonitoringData = useAppStore((state) => state.updateMonitoringData)
   const addAlert = useAppStore((state) => state.addAlert)
+  
+  const { logAction } = useAuditLog()
+  const toast = useToast()
 
   const [isEditing, setIsEditing] = useState(false)
   const [editReason, setEditReason] = useState('')
@@ -121,7 +125,30 @@ export function DayDetailModal({ isOpen, onClose, date }: DayDetailModalProps) {
       action: newHcStatus === 'FAIL' || newTotalStatus === 'FAIL' ? 'INVESTIGAR' : 'MONITORAR',
     })
 
-    // Registrar auditoria
+    // Registrar auditoria detalhada
+    logAction('UPDATE', 'MONITORING_DATA', dayData.id, {
+      entityName: `Dados de medição - ${formatDate(date)}`,
+      previousValue: {
+        subOil: dayData.subOil,
+        subGas: dayData.subGas,
+        topOil: dayData.topOil,
+        topGas: dayData.topGas,
+      },
+      newValue: {
+        subOil: editValues.subOil,
+        subGas: editValues.subGas,
+        topOil: editValues.topOil,
+        topGas: editValues.topGas,
+      },
+      reason: editReason,
+    })
+
+    // Notificar usuário
+    toast.success(
+      'Dados atualizados',
+      `Medição de ${formatDate(date)} atualizada com sucesso`
+    )
+
     addAlert({
       type: 'info',
       severity: 'info',

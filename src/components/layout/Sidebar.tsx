@@ -1,4 +1,4 @@
-import { Activity, Gauge, FileCheck, Droplets } from 'lucide-react'
+import { Activity, Gauge, FileCheck, Droplets, AlertTriangle } from 'lucide-react'
 import { cn } from '@/utils'
 
 interface Module {
@@ -26,6 +26,12 @@ const modules: Module[] = [
     label: 'Conformidade ANP',
     icon: FileCheck,
     description: 'RANP 44/2015',
+  },
+  {
+    id: 'desenquadramento',
+    label: 'Desenquadramento',
+    icon: AlertTriangle,
+    description: 'Seção 10 RANP44',
   },
 ]
 

@@ -1,6 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { Layout } from '@/components/layout'
-import { MonitoringPage, CalibrationPage, CompliancePage } from '@/pages'
+import { MonitoringPage, CalibrationPage, CompliancePage, Desenquadramento } from '@/pages'
 import {
   NewMeterModal,
   ImportDataModal,
@@ -40,6 +40,7 @@ function App() {
           <Route path="/monitoring" element={<MonitoringPage />} />
           <Route path="/calibration" element={<CalibrationPage />} />
           <Route path="/compliance" element={<CompliancePage />} />
+          <Route path="/desenquadramento" element={<Desenquadramento />} />
           <Route path="*" element={<Navigate to="/monitoring" replace />} />
         </Routes>
       </Layout>

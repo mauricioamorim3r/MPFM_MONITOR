@@ -266,6 +266,7 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({ isOpen, onClos
             multiple
             onChange={handleFileSelect}
             className="hidden"
+            aria-label="Select PDF files"
           />
           <FileUp
             size={48}
@@ -339,6 +340,8 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({ isOpen, onClos
                       )}
                       
                       <button
+                        type="button"
+                        title="Remover arquivo"
                         onClick={(e) => {
                           e.stopPropagation()
                           removeFile(index)
