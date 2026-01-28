@@ -1,4 +1,4 @@
-import { Activity, Gauge, FileCheck, Droplets, AlertTriangle } from 'lucide-react'
+import { Activity, Gauge, FileCheck, Droplets, AlertTriangle, ClipboardList } from 'lucide-react'
 import { cn } from '@/utils'
 
 interface Module {
@@ -14,6 +14,12 @@ const modules: Module[] = [
     label: 'Monitoramento SGM-FM',
     icon: Activity,
     description: 'Variáveis críticas',
+  },
+  {
+    id: 'registro-diario',
+    label: 'Registro Diário',
+    icon: ClipboardList,
+    description: 'Variáveis e gráficos',
   },
   {
     id: 'calibration',

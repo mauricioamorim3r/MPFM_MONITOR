@@ -1,6 +1,6 @@
 /**
  * Serviço de Parsing de PDFs - MPFM Monitor
- * Extrai dados de relatórios B03 (Topside), B05 (Subsea) e PVT Calibration
+ * Extrai dados de relatórios B03 (Topside), B05 (Subsea), Separator e PVT Calibration
  */
 
 import * as pdfjsLib from 'pdfjs-dist'
@@ -9,17 +9,34 @@ import type { TextItem } from 'pdfjs-dist/types/src/display/api'
 // Configurar worker do PDF.js
 pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
 
-export type PDFType = 'B03_TOPSIDE' | 'B05_SUBSEA' | 'PVT_CALIBRATION' | 'UNKNOWN'
+export type PDFType = 'B03_TOPSIDE' | 'B05_SUBSEA' | 'PVT_CALIBRATION' | 'SEPARATOR' | 'FISICO_QUIMICO' | 'UNKNOWN'
 
 export interface ParsedDailyData {
   date: string
-  source: 'TOPSIDE' | 'SUBSEA'
+  source: 'TOPSIDE' | 'SUBSEA' | 'SEPARATOR'
   meterTag: string
   oil: number
   gas: number
   water: number
   hc: number
   total: number
+  fileName: string
+}
+
+export interface ParsedPhysicoChemicalData {
+  date: string
+  sampleId: string
+  density: number
+  api: number
+  bsw: number
+  viscosity?: number
+  pourPoint?: number
+  sulphur?: number
+  saltContent?: number
+  reidVaporPressure?: number
+  h2s?: number
+  co2?: number
+  waterContent?: number
   fileName: string
 }
 
@@ -49,6 +66,7 @@ export interface ParseResult {
   type: PDFType
   dailyData?: ParsedDailyData
   calibrationData?: ParsedCalibrationData
+  physicoChemicalData?: ParsedPhysicoChemicalData
   error?: string
   fileName: string
 }
@@ -59,6 +77,21 @@ export interface ParseResult {
 function detectPDFType(text: string, fileName: string): PDFType {
   const upperText = text.toUpperCase()
   const upperFileName = fileName.toUpperCase()
+  
+  // Análise físico-química (prioridade - verificar antes)
+  if (upperFileName.includes('FQ') || upperFileName.includes('FISICO') || 
+      upperText.includes('ANÁLISE FÍSICO-QUÍMICA') || upperText.includes('CRUDE OIL ANALYSIS') ||
+      upperText.includes('DENSITY') && upperText.includes('BSW') && upperText.includes('API')) {
+    return 'FISICO_QUIMICO'
+  }
+  
+  // Separador de Testes
+  if (upperFileName.includes('SEPARATOR') || upperFileName.includes('TS_') || 
+      upperFileName.includes('TEST_SEP') || upperFileName.includes('SEP_') ||
+      upperText.includes('TEST SEPARATOR') || upperText.includes('SEPARADOR DE TESTE') ||
+      (upperText.includes('SEPARATOR') && (upperText.includes('DAILY') || upperText.includes('MASS')))) {
+    return 'SEPARATOR'
+  }
   
   if (upperFileName.includes('B03') || upperText.includes('TOPSIDE') || upperText.includes('RISER P5') || upperText.includes('RISER P6')) {
     return 'B03_TOPSIDE'
@@ -229,6 +262,134 @@ function parseB05Subsea(text: string, fileName: string): ParsedDailyData {
 }
 
 /**
+ * Parse de PDF Separator (Test Separator Daily)
+ */
+function parseSeparator(text: string, fileName: string): ParsedDailyData {
+  const date = extractDate(text, fileName)
+  
+  // Identificar separador
+  const meterTag = 'TEST_SEPARATOR'
+  
+  // Extrair massas - padrões típicos dos relatórios de separador
+  let oil = extractNumber(text, /(?:oil|óleo)[\s:]+(\d+\.?\d*)/i)
+  let gas = extractNumber(text, /(?:gas|gás)[\s:]+(\d+\.?\d*)/i)
+  let water = extractNumber(text, /(?:water|água)[\s:]+(\d+\.?\d*)/i)
+  
+  // Tenta padrão alternativo com tabela
+  if (oil === 0) {
+    const oilMatch = text.match(/(?:Mass|Massa).*?Oil\s+(\d+\.?\d*)/i) ||
+                     text.match(/Oil.*?(?:Mass|Massa)\s+(\d+\.?\d*)/i)
+    if (oilMatch) oil = parseFloat(oilMatch[1]) || 0
+  }
+  if (gas === 0) {
+    const gasMatch = text.match(/(?:Mass|Massa).*?Gas\s+(\d+\.?\d*)/i) ||
+                     text.match(/Gas.*?(?:Mass|Massa)\s+(\d+\.?\d*)/i)
+    if (gasMatch) gas = parseFloat(gasMatch[1]) || 0
+  }
+  if (water === 0) {
+    const waterMatch = text.match(/(?:Mass|Massa).*?Water\s+(\d+\.?\d*)/i) ||
+                       text.match(/Water.*?(?:Mass|Massa)\s+(\d+\.?\d*)/i)
+    if (waterMatch) water = parseFloat(waterMatch[1]) || 0
+  }
+  
+  // Procura por valores em formato de massa
+  const massPattern = /(\d{3,5}\.?\d*)\s*(?:t|ton|kg)/gi
+  const masses: number[] = []
+  let match
+  while ((match = massPattern.exec(text)) !== null) {
+    masses.push(parseFloat(match[1]))
+  }
+  
+  if (masses.length >= 3 && oil === 0) {
+    oil = masses[0]
+    gas = masses[1]
+    water = masses[2] || 0
+  }
+  
+  const hc = oil + gas
+  const total = hc + water
+  
+  return {
+    date,
+    source: 'SEPARATOR',
+    meterTag,
+    oil,
+    gas,
+    water,
+    hc,
+    total,
+    fileName,
+  }
+}
+
+/**
+ * Parse de PDF de Análise Físico-Química
+ */
+function parsePhysicoChemical(text: string, fileName: string): ParsedPhysicoChemicalData {
+  const date = extractDate(text, fileName)
+  
+  // Extrair ID da amostra
+  const sampleMatch = text.match(/(?:sample|amostra)[\s:]+([A-Z0-9\-]+)/i) ||
+                      text.match(/(?:ID|código)[\s:]+([A-Z0-9\-]+)/i)
+  const sampleId = sampleMatch ? sampleMatch[1] : fileName.replace('.pdf', '')
+  
+  // Densidade (kg/m³ a 15°C ou 20°C)
+  const density = extractNumber(text, /(?:density|densidade)[\s@:]+(?:\d+[°C℃]\s*)?(\d+\.?\d*)/i) ||
+                  extractNumber(text, /(\d{3,4}\.?\d*)\s*kg\/m/i)
+  
+  // API gravity
+  const api = extractNumber(text, /API[\s:]+(\d+\.?\d*)/i) ||
+              extractNumber(text, /(?:grau|°)\s*API[\s:]+(\d+\.?\d*)/i)
+  
+  // BSW (Basic Sediment and Water %)
+  const bsw = extractNumber(text, /BS[\s]*[&W]*[\s:]+(\d+\.?\d*)/i) ||
+              extractNumber(text, /BSW[\s:]+(\d+\.?\d*)/i)
+  
+  // Viscosidade (cSt ou mPa.s)
+  const viscosity = extractNumber(text, /(?:viscosity|viscosidade)[\s@:]+(?:\d+[°C℃]\s*)?(\d+\.?\d*)/i)
+  
+  // Pour Point (°C)
+  const pourPoint = extractNumber(text, /(?:pour point|ponto de fluidez)[\s:]+(-?\d+\.?\d*)/i)
+  
+  // Teor de Enxofre (% massa)
+  const sulphur = extractNumber(text, /(?:sulphur|sulfur|enxofre)[\s:]+(\d+\.?\d*)/i)
+  
+  // Teor de Sal (mg/L ou ppm)
+  const saltContent = extractNumber(text, /(?:salt|sal)[\s:]+(\d+\.?\d*)/i)
+  
+  // Reid Vapor Pressure (kPa)
+  const reidVaporPressure = extractNumber(text, /(?:RVP|reid vapor|pressão de vapor)[\s:]+(\d+\.?\d*)/i)
+  
+  // H2S (ppm)
+  const h2s = extractNumber(text, /H2S[\s:]+(\d+\.?\d*)/i) ||
+              extractNumber(text, /(?:sulfeto de hidrogênio)[\s:]+(\d+\.?\d*)/i)
+  
+  // CO2 (mol%)
+  const co2 = extractNumber(text, /CO2[\s:]+(\d+\.?\d*)/i) ||
+              extractNumber(text, /(?:dióxido de carbono)[\s:]+(\d+\.?\d*)/i)
+  
+  // Teor de Água (%)
+  const waterContent = extractNumber(text, /(?:water content|teor de água)[\s:]+(\d+\.?\d*)/i)
+  
+  return {
+    date,
+    sampleId,
+    density,
+    api,
+    bsw,
+    viscosity,
+    pourPoint,
+    sulphur,
+    saltContent,
+    reidVaporPressure,
+    h2s,
+    co2,
+    waterContent,
+    fileName,
+  }
+}
+
+/**
  * Parse de PDF PVT Calibration
  */
 function parsePVTCalibration(text: string, fileName: string): ParsedCalibrationData {
@@ -361,6 +522,14 @@ export async function parsePDFFile(file: File): Promise<ParseResult> {
           fileName: file.name,
         }
       
+      case 'SEPARATOR':
+        return {
+          success: true,
+          type,
+          dailyData: parseSeparator(text, file.name),
+          fileName: file.name,
+        }
+      
       case 'PVT_CALIBRATION':
         return {
           success: true,
@@ -369,11 +538,19 @@ export async function parsePDFFile(file: File): Promise<ParseResult> {
           fileName: file.name,
         }
       
+      case 'FISICO_QUIMICO':
+        return {
+          success: true,
+          type,
+          physicoChemicalData: parsePhysicoChemical(text, file.name),
+          fileName: file.name,
+        }
+      
       default:
         return {
           success: false,
           type: 'UNKNOWN',
-          error: 'Tipo de PDF não reconhecido. Use arquivos B03 (Topside), B05 (Subsea) ou PVT Calibration.',
+          error: 'Tipo de PDF não reconhecido. Use arquivos B03 (Topside), B05 (Subsea), Separator, PVT Calibration ou Análise Físico-Química.',
           fileName: file.name,
         }
     }
