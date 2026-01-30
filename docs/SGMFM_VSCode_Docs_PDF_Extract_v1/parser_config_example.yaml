@@ -1,0 +1,37 @@
+# Exemplo de configuração para parser “config-driven”
+# (opcional) — ajuda a manter regex/labels fora do código
+
+mpfm_daily_hourly:
+  section_header_regex: '(?P<asset_label>.+?)\s*-\s*(?P<asset_tag>\d{2}FT\d{4})'
+  report_window_regex: '(Daily|Hourly) Report from\s*(?P<start>\d{4}\.\d{2}\.\d{2} \d{2}:\d{2})\s*to\s*(?P<end>\d{4}\.\d{2}\.\d{2} \d{2}:\d{2})'
+  production_block:
+    title_variants:
+      - 'Production Previous Day'
+      - 'Production Previous Hour'
+    phases: ['Gas','Oil','HC','Water','Total']
+    rows:
+      - { label: 'MPFM uncorrected mass', unit: 't', key_prefix: 'uncorrected_mass' }
+      - { label: 'MPFM corrected mass', unit: 't', key_prefix: 'corrected_mass' }
+      - { label: 'PVT reference mass', unit: 't', key_prefix: 'pvt_ref_mass' }
+      - { label: 'PVT reference volume', unit: 'Sm3', key_prefix: 'pvt_ref_volume' }
+      - { label: 'PVT reference mass @20 degC', unit: 't', key_prefix: 'pvt_ref_mass_20c' }
+      - { label: 'PVT reference volume @20 degC', unit: 'Sm3', key_prefix: 'pvt_ref_volume_20c' }
+    null_tokens: ['-']
+  flow_weighted_averages:
+    title_variants:
+      - 'Flow Weighted Averages Previous Day'
+      - 'Flow Weighted Averages Previous Hour'
+    rows:
+      - { label: 'Pressure', unit: 'barg', cols: { Meter: 'meter_pressure_barg' } }
+      - { label: 'Temperature', unit: 'C', cols: { Meter: 'meter_temperature_c' } }
+      - { label: 'Density', unit: 'kg/m3', cols: { Gas: 'gas_density_kg_m3', Oil: 'oil_density_kg_m3', Water: 'water_density_kg_m3' } }
+
+pvt_calibration:
+  calibration_no_regex: 'Calibration No\.\s*:\s*(?P<cal_no>\d+)'
+  selected_mpfm_regex: 'Selected MPFM\s*:\s*(?P<selected>.+)'
+  average_values:
+    - { label: 'Pressure', unit: 'kPa', mpfm: 'avg_pressure_kpa_mpfm', separator: 'avg_pressure_kpa_separator' }
+    - { label: 'Temperature', unit: 'C', mpfm: 'avg_temperature_c_mpfm', separator: 'avg_temperature_c_separator' }
+    - { label: 'Density - oil', unit: 'kg/m3', mpfm: 'avg_density_oil_kg_m3_mpfm', separator: 'avg_density_oil_kg_m3_separator' }
+    - { label: 'Density - gas', unit: 'kg/m3', mpfm: 'avg_density_gas_kg_m3_mpfm', separator: 'avg_density_gas_kg_m3_separator' }
+    - { label: 'Density - water', unit: 'kg/m3', mpfm: 'avg_density_water_kg_m3_mpfm', separator: 'avg_density_water_kg_m3_separator' }

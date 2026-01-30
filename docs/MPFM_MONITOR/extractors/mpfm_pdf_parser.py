@@ -59,36 +59,40 @@ PHASES = ['Gas', 'Oil', 'HC', 'Water', 'Total']
 @dataclass
 class MPFMProductionData:
     """Dados de produção MPFM (por fase)."""
-    # Massas não corrigidas (t)
+    # 1. Massas não corrigidas (t)
     uncorr_mass_gas: Optional[float] = None
     uncorr_mass_oil: Optional[float] = None
     uncorr_mass_hc: Optional[float] = None
     uncorr_mass_water: Optional[float] = None
     uncorr_mass_total: Optional[float] = None
     
-    # Massas corrigidas (t)
+    # 2. Massas corrigidas (t)
     corr_mass_gas: Optional[float] = None
     corr_mass_oil: Optional[float] = None
     corr_mass_hc: Optional[float] = None
     corr_mass_water: Optional[float] = None
     corr_mass_total: Optional[float] = None
     
-    # Referência PVT (t)
+    # 3. Referência PVT Mass (t)
     pvt_ref_mass_gas: Optional[float] = None
     pvt_ref_mass_oil: Optional[float] = None
-    pvt_ref_mass_hc: Optional[float] = None
     pvt_ref_mass_water: Optional[float] = None
-    pvt_ref_mass_total: Optional[float] = None
+    # HC e Total geralmente são "-"
     
-    # Volumes PVT (Sm³)
+    # 4. Referência PVT Volume (Sm³)
     pvt_ref_vol_gas_sm3: Optional[float] = None
     pvt_ref_vol_oil_sm3: Optional[float] = None
+    pvt_ref_vol_water_sm3: Optional[float] = None
     
-    # Volumes @20°C
-    pvt_ref_vol_gas_sm3_20c: Optional[float] = None
-    pvt_ref_vol_oil_sm3_20c: Optional[float] = None
-    pvt_ref_mass_gas_20c: Optional[float] = None
-    pvt_ref_mass_oil_20c: Optional[float] = None
+    # 5. Referência PVT Mass @20°C (t)
+    pvt_ref_mass_20c_gas: Optional[float] = None
+    pvt_ref_mass_20c_oil: Optional[float] = None
+    pvt_ref_mass_20c_water: Optional[float] = None
+    
+    # 6. Referência PVT Volume @20°C (Sm³)
+    pvt_ref_vol_20c_gas_sm3: Optional[float] = None
+    pvt_ref_vol_20c_oil_sm3: Optional[float] = None
+    pvt_ref_vol_20c_water_sm3: Optional[float] = None
 
 
 @dataclass
@@ -348,19 +352,15 @@ class MPFMPDFParser:
     def _extract_production_table(self, text: str, section_name: str = "Production") -> MPFMProductionData:
         """
         Extrai tabela de produção do texto.
-        
-        Procura por linhas como:
-        "MPFM uncorrected mass [t]   732.234   2487.430   3219.664   0.438   3220.102"
         """
         data = MPFMProductionData()
-        
         lines = text.split('\n')
         
         for line in lines:
             line_lower = line.lower()
             
-            # MPFM uncorrected mass
-            if 'mpfm uncorrected mass' in line_lower or 'uncorrected mass' in line_lower:
+            # 1. MPFM uncorrected mass
+            if 'mpfm uncorrected mass' in line_lower:
                 values = self._extract_phase_values(line)
                 if values:
                     data.uncorr_mass_gas = values.get('Gas')
@@ -369,8 +369,8 @@ class MPFMPDFParser:
                     data.uncorr_mass_water = values.get('Water')
                     data.uncorr_mass_total = values.get('Total')
             
-            # MPFM corrected mass
-            elif 'mpfm corrected mass' in line_lower or 'corrected mass' in line_lower:
+            # 2. MPFM corrected mass
+            elif 'mpfm corrected mass' in line_lower:
                 values = self._extract_phase_values(line)
                 if values:
                     data.corr_mass_gas = values.get('Gas')
@@ -379,35 +379,39 @@ class MPFMPDFParser:
                     data.corr_mass_water = values.get('Water')
                     data.corr_mass_total = values.get('Total')
             
-            # PVT reference mass
+            # 3. PVT reference mass (normal)
             elif 'pvt reference mass' in line_lower and '20' not in line_lower:
                 values = self._extract_phase_values(line)
                 if values:
                     data.pvt_ref_mass_gas = values.get('Gas')
                     data.pvt_ref_mass_oil = values.get('Oil')
-                    data.pvt_ref_mass_hc = values.get('HC')
                     data.pvt_ref_mass_water = values.get('Water')
-                    data.pvt_ref_mass_total = values.get('Total')
             
-            # PVT reference volume
+            # 4. PVT reference volume (normal)
             elif 'pvt reference volume' in line_lower and '20' not in line_lower:
                 values = self._extract_phase_values(line)
                 if values:
                     data.pvt_ref_vol_gas_sm3 = values.get('Gas')
                     data.pvt_ref_vol_oil_sm3 = values.get('Oil')
+                    data.pvt_ref_vol_water_sm3 = values.get('Water')
             
-            # PVT @20°C
-            elif 'pvt reference' in line_lower and '20' in line_lower:
-                if 'volume' in line_lower:
-                    values = self._extract_phase_values(line)
-                    if values:
-                        data.pvt_ref_vol_gas_sm3_20c = values.get('Gas')
-                        data.pvt_ref_vol_oil_sm3_20c = values.get('Oil')
-                elif 'mass' in line_lower:
-                    values = self._extract_phase_values(line)
-                    if values:
-                        data.pvt_ref_mass_gas_20c = values.get('Gas')
-                        data.pvt_ref_mass_oil_20c = values.get('Oil')
+            # 5. PVT reference mass @20 degC
+            elif 'pvt reference mass' in line_lower and '20' in line_lower:
+                values = self._extract_phase_values(line)
+                if values:
+                    data.pvt_ref_mass_20c_gas = values.get('Gas')
+                    data.pvt_ref_mass_20c_oil = values.get('Oil')
+                    data.pvt_ref_mass_20c_water = values.get('Water')
+
+            # 6. PVT reference volume @20 degC
+            elif 'pvt reference volume' in line_lower and '20' in line_lower:
+                values = self._extract_phase_values(line)
+                if values:
+                    data.pvt_ref_vol_20c_gas_sm3 = values.get('Gas')
+                    data.pvt_ref_vol_20c_oil_sm3 = values.get('Oil')
+                    data.pvt_ref_vol_20c_water_sm3 = values.get('Water')
+        
+        return data
         
         return data
     

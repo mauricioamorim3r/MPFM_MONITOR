@@ -17,7 +17,21 @@ import zipfile
 import tempfile
 import hashlib
 from pathlib import Path
+import sys
 import re
+
+# Adicionar caminho para módulos em docs
+DOCS_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "../docs"))
+if DOCS_PATH not in sys.path:
+    sys.path.append(DOCS_PATH)
+
+try:
+    from MPFM_MONITOR.extractors.mpfm_pdf_parser import MPFMPDFParser, MPFMReportType, MPFMProductionData
+except ImportError:
+    # Fallback ou log de erro se não encontrar
+    print("AVISO: MPFM_MONITOR.extractors não encontrado em docs/")
+    MPFMPDFParser = None
+    MPFMReportType = None
 
 # ============================================================================
 # CONFIGURAÇÃO
@@ -259,44 +273,167 @@ def init_database():
         )
     """)
     
-    # Tabela de arquivos importados
+    # --- TABELAS DIMENSIONAIS (Schema Recomendado v7) ---
+
+    # Tabela de Arquivos (dim_file)
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS staged_file (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            batch_id TEXT,
+        CREATE TABLE IF NOT EXISTS dim_file (
+            file_id INTEGER PRIMARY KEY AUTOINCREMENT,
             file_name TEXT NOT NULL,
-            original_path TEXT,
-            file_type TEXT NOT NULL,
-            file_size INTEGER,
-            file_hash TEXT,
-            parse_status TEXT DEFAULT 'PENDING',
-            records_extracted INTEGER DEFAULT 0,
-            warnings TEXT,
-            errors TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            file_hash_sha256 TEXT UNIQUE,
+            file_type TEXT,
+            file_size_bytes INTEGER,
+            ingested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            source_path TEXT,
+            parser_version TEXT,
+            status TEXT DEFAULT 'PROCESSED',
+            error_message TEXT
         )
     """)
 
-    # --- NOVAS TABELAS V2 (Modelo Normalizado) ---
-
-    # Fatos Horários (MPFM Hourly)
+    # Tabela de Ativos (dim_asset_registry)
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS fact_mpfm_hourly (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            meter_tag TEXT NOT NULL,
+        CREATE TABLE IF NOT EXISTS dim_asset_registry (
+            asset_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            asset_tag TEXT NOT NULL UNIQUE,
+            asset_label TEXT,
+            asset_type TEXT,
+            bank_expected INTEGER,
+            stream_expected INTEGER,
+            details_json TEXT,
+            effective_from TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            is_active BOOLEAN DEFAULT 1
+        )
+    """)
+
+    # --- TABELAS FATO (Schema Recomendado v7) ---
+
+    # Fato Produção MPFM (Unifica Daily e Hourly)
+    # Cobre todos os campos do doc 02_field_map_mpfm_daily_hourly.md
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS fact_mpfm_production (
+            fact_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_id INTEGER,
+            asset_id INTEGER,
+            asset_tag TEXT NOT NULL,
+            report_type TEXT NOT NULL, -- 'DAILY' ou 'HOURLY'
+            
+            -- Tempo
+            period_start TIMESTAMP NOT NULL,
             period_end TIMESTAMP NOT NULL,
-            period_start TIMESTAMP,
-            phase TEXT,
-            uncorrected_mass REAL,
-            corrected_mass REAL,
-            pvt_ref_mass REAL,
-            pvt_ref_vol REAL,
-            avg_pressure REAL,
-            avg_temp REAL,
-            avg_density REAL,
-            source_file_id INTEGER,
+            business_date DATE,
+            
+            -- Metadados
+            bank INTEGER,
+            stream INTEGER,
+            riser_name TEXT,
+            
+            -- 1. MPFM Uncorrected Mass (t)
+            uncorrected_mass_gas_t REAL,
+            uncorrected_mass_oil_t REAL,
+            uncorrected_mass_hc_t REAL,
+            uncorrected_mass_water_t REAL,
+            uncorrected_mass_total_t REAL,
+
+            -- 2. MPFM Corrected Mass (t)
+            corrected_mass_gas_t REAL,
+            corrected_mass_oil_t REAL,
+            corrected_mass_hc_t REAL,
+            corrected_mass_water_t REAL,
+            corrected_mass_total_t REAL,
+
+            -- 3. PVT Reference Mass (t)
+            pvt_ref_mass_gas_t REAL,
+            pvt_ref_mass_oil_t REAL,
+            pvt_ref_mass_water_t REAL,
+
+            -- 4. PVT Reference Volume (Sm3)
+            pvt_ref_vol_gas_sm3 REAL,
+            pvt_ref_vol_oil_sm3 REAL,
+            pvt_ref_vol_water_sm3 REAL,
+
+            -- 5. PVT Reference Mass @20C (t)
+            pvt_ref_mass_20c_gas_t REAL,
+            pvt_ref_mass_20c_oil_t REAL,
+            pvt_ref_mass_20c_water_t REAL,
+
+            -- 6. PVT Reference Volume @20C (Sm3)
+            pvt_ref_vol_20c_gas_sm3 REAL,
+            pvt_ref_vol_20c_oil_sm3 REAL,
+            pvt_ref_vol_20c_water_sm3 REAL,
+
+            -- 7. Variações/Médias
+            pressure_kpa REAL,
+            temperature_c REAL,
+            density_gas_kgm3 REAL,
+            density_oil_kgm3 REAL,
+            density_water_kgm3 REAL,
+
+            quality_flags TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(meter_tag, period_end, phase)
+            
+            FOREIGN KEY(file_id) REFERENCES dim_file(file_id),
+            UNIQUE(asset_tag, period_end, report_type)
+        )
+    """)
+
+    # Fato Calibração PVT (fact_pvt_calibration)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS fact_pvt_calibration (
+            cal_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_id INTEGER,
+            asset_tag TEXT,
+            calibration_no INTEGER,
+            
+            start_date TIMESTAMP,
+            end_date TIMESTAMP,
+            status TEXT,
+            
+            -- Fatores K (Used/New)
+            k_oil_used REAL, k_oil_new REAL,
+            k_gas_used REAL, k_gas_new REAL,
+            k_water_used REAL, k_water_new REAL,
+            k_hc_used REAL, k_hc_new REAL,
+
+            -- Médias (MPFM vs Separator)
+            mpfm_pressure_kpa REAL, sep_pressure_kpa REAL,
+            mpfm_temp_c REAL, sep_temp_c REAL,
+            
+            mpfm_dens_oil_kgm3 REAL, sep_dens_oil_kgm3 REAL,
+            mpfm_dens_gas_kgm3 REAL, sep_dens_gas_kgm3 REAL,
+            mpfm_dens_water_kgm3 REAL, sep_dens_water_kgm3 REAL,
+
+            -- Acumulados Mass (t)
+            mpfm_accum_oil_t REAL, sep_accum_oil_t REAL,
+            mpfm_accum_gas_t REAL, sep_accum_gas_t REAL,
+            mpfm_accum_water_t REAL, sep_accum_water_t REAL,
+
+            details_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            
+            FOREIGN KEY(file_id) REFERENCES dim_file(file_id),
+            UNIQUE(calibration_no, asset_tag)
+        )
+    """)
+    
+    # Fato Reconciliação Diária (fact_reconciliation_daily)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS fact_reconciliation_daily (
+            rec_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            business_date DATE NOT NULL,
+            asset_tag TEXT NOT NULL,
+            metric_name TEXT NOT NULL, -- ex: 'corrected_mass_oil_t'
+            
+            daily_value REAL,
+            sum_hourly_value REAL,
+            diff_abs REAL,
+            diff_pct REAL,
+            
+            status TEXT, -- PASS, WARN, FAIL
+            details TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            
+            UNIQUE(business_date, asset_tag, metric_name)
         )
     """)
 
@@ -317,6 +454,179 @@ def init_database():
     
     conn.commit()
     conn.close()
+
+def classify_file(filename: str) -> FileType:
+    lower = filename.lower()
+    if filename.endswith(".zip"):
+        return FileType.ZIP_BATCH
+    if filename.endswith(".xml"):
+        return FileType.XML_ANP
+    if "daily" in lower and "mpfm" in lower:
+        return FileType.MPFM_DAILY
+    if "hourly" in lower and "mpfm" in lower:
+        return FileType.MPFM_HOURLY
+    if "pvt" in lower and "calibration" in lower:
+        return FileType.PDF_CALIBRATION
+    if "daily" in lower and ".xls" in lower:
+        return FileType.EXCEL_DAILY
+    return FileType.UNKNOWN
+
+def insert_mpfm_production(cursor, record, file_id, report_type):
+    prod = record.production
+    if not prod: return
+
+    cursor.execute("""
+        INSERT OR REPLACE INTO fact_mpfm_production (
+            file_id, asset_tag, report_type,
+            period_start, period_end, business_date,
+            bank, stream, riser_name,
+            
+            uncorrected_mass_gas_t, uncorrected_mass_oil_t, uncorrected_mass_hc_t, uncorrected_mass_water_t, uncorrected_mass_total_t,
+            corrected_mass_gas_t, corrected_mass_oil_t, corrected_mass_hc_t, corrected_mass_water_t, corrected_mass_total_t,
+            pvt_ref_mass_gas_t, pvt_ref_mass_oil_t, pvt_ref_mass_water_t,
+            pvt_ref_vol_gas_sm3, pvt_ref_vol_oil_sm3, pvt_ref_vol_water_sm3,
+            pvt_ref_mass_20c_gas_t, pvt_ref_mass_20c_oil_t, pvt_ref_mass_20c_water_t,
+            pvt_ref_vol_20c_gas_sm3, pvt_ref_vol_20c_oil_sm3, pvt_ref_vol_20c_water_sm3,
+            
+            pressure_kpa, temperature_c,
+            density_gas_kgm3, density_oil_kgm3, density_water_kgm3,
+            quality_flags
+        ) VALUES (
+            ?, ?, ?,
+            ?, ?, ?,
+            ?, ?, ?,
+            ?, ?, ?, ?, ?,
+            ?, ?, ?, ?, ?,
+            ?, ?, ?,
+            ?, ?, ?,
+            ?, ?, ?,
+            ?, ?, ?,
+            ?, ?,
+            ?, ?, ?,
+            ?
+        )
+    """, (
+        file_id, record.asset_tag, report_type,
+        record.period_start, record.period_end, record.period_start.date(),
+        record.bank, record.stream, record.riser_name,
+        
+        prod.uncorr_mass_gas, prod.uncorr_mass_oil, prod.uncorr_mass_hc, prod.uncorr_mass_water, prod.uncorr_mass_total,
+        prod.corr_mass_gas, prod.corr_mass_oil, prod.corr_mass_hc, prod.corr_mass_water, prod.corr_mass_total,
+        prod.pvt_ref_mass_gas, prod.pvt_ref_mass_oil, prod.pvt_ref_mass_water,
+        prod.pvt_ref_vol_gas_sm3, prod.pvt_ref_vol_oil_sm3, prod.pvt_ref_vol_water_sm3,
+        prod.pvt_ref_mass_20c_gas, prod.pvt_ref_mass_20c_oil, prod.pvt_ref_mass_20c_water,
+        prod.pvt_ref_vol_20c_gas_sm3, prod.pvt_ref_vol_20c_oil_sm3, prod.pvt_ref_vol_20c_water_sm3,
+        
+        record.averages.pressure_kpa if record.averages else None,
+        record.averages.temperature_c if record.averages else None,
+        record.averages.density_gas if record.averages else None,
+        record.averages.density_oil if record.averages else None,
+        record.averages.density_water if record.averages else None,
+        json.dumps(record.quality_flags)
+    ))
+
+def insert_pvt_calibration(cursor, record, file_id):
+    cursor.execute("""
+        INSERT OR REPLACE INTO fact_pvt_calibration (
+            file_id, asset_tag, calibration_no,
+            start_date, end_date, status,
+            
+            k_oil_used, k_oil_new,
+            k_gas_used, k_gas_new,
+            k_water_used, k_water_new,
+            k_hc_used, k_hc_new,
+            
+            mpfm_pressure_kpa, sep_pressure_kpa,
+            mpfm_temp_c, sep_temp_c,
+            mpfm_dens_oil_kgm3, sep_dens_oil_kgm3,
+            mpfm_dens_gas_kgm3, sep_dens_gas_kgm3,
+            mpfm_dens_water_kgm3, sep_dens_water_kgm3,
+            
+            mpfm_accum_oil_t, sep_accum_oil_t,
+            mpfm_accum_gas_t, sep_accum_gas_t,
+            mpfm_accum_water_t, sep_accum_water_t
+        ) VALUES (
+            ?, ?, ?,
+            ?, ?, ?,
+            ?, ?, ?, ?, ?, ?, ?, ?,
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+            ?, ?, ?, ?, ?, ?
+        )
+    """, (
+        file_id, record.asset_tag, record.calibration_no,
+        record.calibration_started, record.calibration_ended, record.status,
+        
+        record.k_factor_oil_used, record.k_factor_oil_new,
+        record.k_factor_gas_used, record.k_factor_gas_new,
+        record.k_factor_water_used, record.k_factor_water_new,
+        record.k_factor_hc_used, record.k_factor_hc_new,
+        
+        record.avg_pressure_mpfm_kpa, record.avg_pressure_sep_kpa,
+        record.avg_temperature_mpfm_c, record.avg_temperature_sep_c,
+        record.avg_density_oil_mpfm, record.avg_density_oil_sep,
+        record.avg_density_gas_mpfm, record.avg_density_gas_sep,
+        record.avg_density_water_mpfm, record.avg_density_water_sep,
+        
+        record.accum_mass_oil_mpfm, record.accum_mass_oil_sep,
+        record.accum_mass_gas_mpfm, record.accum_mass_gas_sep,
+        record.accum_mass_water_mpfm, record.accum_mass_water_sep
+    ))
+
+def process_pdf_file(file_path: Path, file_id: int, conn: sqlite3.Connection):
+    if not MPFMPDFParser:
+        raise Exception("Módulo parser não carregado")
+        
+    parser = MPFMPDFParser(str(file_path))
+    result = parser.extract()
+    
+    if not result.success:
+        raise Exception(f"Erro no parser: {result.errors}")
+    
+    cursor = conn.cursor()
+    
+    for rec in result.hourly_records:
+        insert_mpfm_production(cursor, rec, file_id, "HOURLY")
+        
+    for rec in result.daily_records:
+        insert_mpfm_production(cursor, rec, file_id, "DAILY")
+        
+    for rec in result.calibration_records:
+        insert_pvt_calibration(cursor, rec, file_id)
+
+    conn.commit()
+
+def process_zip_upload(zip_path: Path, batch_id: str, conn: sqlite3.Connection):
+    """Processa arquivo ZIP contendo múltiplos relatórios."""
+    with zipfile.ZipFile(zip_path, 'r') as z:
+        for file_info in z.infolist():
+            if file_info.filename.endswith('/') or file_info.filename.startswith('__MACOSX'):
+                continue
+                
+            with tempfile.TemporaryDirectory() as temp_dir:
+                extracted_path = Path(temp_dir) / Path(file_info.filename).name
+                with open(extracted_path, 'wb') as f_out:
+                    f_out.write(z.read(file_info.filename))
+                
+                f_type = classify_file(extracted_path.name)
+                
+                # Registrar no dim_file
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO dim_file (file_name, file_type, file_size_bytes, source_path)
+                    VALUES (?, ?, ?, ?)
+                """, (extracted_path.name, f_type.value, file_info.file_size, f"{batch_id}/{file_info.filename}"))
+                file_id = cursor.lastrowid
+                
+                try:
+                    if f_type in [FileType.MPFM_DAILY, FileType.MPFM_HOURLY, FileType.PDF_CALIBRATION]:
+                        process_pdf_file(extracted_path, file_id, conn)
+                        cursor.execute("UPDATE dim_file SET status = 'SUCCESS' WHERE file_id = ?", (file_id,))
+                    else:
+                        cursor.execute("UPDATE dim_file SET status = 'SKIPPED', error_message='Tipo não suportado' WHERE file_id = ?", (file_id,))
+                except Exception as e:
+                    cursor.execute("UPDATE dim_file SET status = 'ERROR', error_message = ? WHERE file_id = ?", (str(e), file_id))
+                
+                conn.commit()
 
 # Inicializa banco na startup
 init_database()
@@ -741,6 +1051,9 @@ async def upload_file(
     conn: sqlite3.Connection = Depends(get_db)
 ):
     """Upload de arquivo para processamento."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    content = b""
+    
     try:
         # Salva arquivo
         file_path = Path(UPLOAD_FOLDER) / file.filename
@@ -749,49 +1062,58 @@ async def upload_file(
             content = await file.read()
             f.write(content)
 
-    # 2. Classificação
-    file_type = classify_file(file.filename)
-    
-    # 3. Hash e Batch ID
-    file_hash = hashlib.sha256(content).hexdigest()
-    batch_id = f"BATCH_{timestamp}" if file_type == FileType.ZIP_BATCH else None
-    
-    # 4. Registrar Staging
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO staged_file 
-        (batch_id, file_name, file_type, file_size, file_hash, parse_status)
-        VALUES (?, ?, ?, ?, ?, 'PENDING')
-    """, (batch_id, file.filename, file_type, len(content), file_hash))
-    
-    file_id = cursor.lastrowid
-    conn.commit()
-    
-    extracted_count = 0
-    warnings = []
-    
-    # 5. Processamento específico
-    if file_type == FileType.ZIP_BATCH:
-        try:
+        # 2. Classificação
+        detected_type = classify_file(file.filename)
+        if file_type is None:
+            file_type = detected_type
+        
+        # 3. Hash e Batch ID
+        file_hash = hashlib.sha256(content).hexdigest()
+        batch_id = f"BATCH_{timestamp}" if file_type == FileType.ZIP_BATCH else None
+        
+        # 4. Registrar Staging
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO staged_file 
+            (batch_id, file_name, file_type, file_size, file_hash, parse_status)
+            VALUES (?, ?, ?, ?, ?, 'PENDING')
+        """, (batch_id, file.filename, file_type.value if file_type else "UNKNOWN", len(content), file_hash))
+        
+        file_id = cursor.lastrowid
+        conn.commit()
+        
+        extracted_count = 0
+        warnings = []
+        
+        # 5. Processamento específico
+        if file_type == FileType.ZIP_BATCH:
             process_zip_upload(file_path, batch_id, conn)
             extracted_count = -1 # Indica batch
-        except Exception as e:
-            cursor.execute("UPDATE staged_file SET parse_status = 'ERROR', errors = ? WHERE id = ?", (str(e), file_id))
-            conn.commit()
-            raise HTTPException(status_code=500, detail=f"Erro processando ZIP: {str(e)}")
+        elif file_type in [FileType.MPFM_DAILY, FileType.MPFM_HOURLY, FileType.PDF_CALIBRATION]:
+             process_pdf_file(file_path, file_id, conn)
+             extracted_count = 1
+             cursor.execute("UPDATE staged_file SET parse_status = 'SUCCESS' WHERE id = ?", (file_id,))
+             conn.commit()
 
-    return UploadResponse(
-        success=True,
-        file_name=file.filename,
-        file_type=file_type,
-        records_extracted=extracted_count,
-        warnings=warnings,
-        errors=[]
-    )
+        return UploadResponse(
+            success=True,
+            file_name=file.filename,
+            file_type=file_type,
+            records_extracted=extracted_count,
+            warnings=warnings,
+            errors=[]
+        )
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Erro no upload: {str(e)}")
 
 def detect_file_type(filename: str) -> Optional[FileType]:
     # Deprecated: use classify_file instead
     return classify_file(filename)
+
+from backend.validators.reconciliation_v2 import ReconciliationValidatorV2
 
 # ============================================================================
 # ENDPOINTS - EXPORTAÇÃO
@@ -837,6 +1159,32 @@ def export_daily_report(
     else:
         # TODO: Implementar CSV e Excel
         return report
+
+@app.post("/api/validate/run")
+def run_validation(
+    start_date: date,
+    end_date: date,
+    conn: sqlite3.Connection = Depends(get_db)
+):
+    """Executa validação de reconciliação (V2) para um período."""
+    validator = ReconciliationValidatorV2(DATABASE_PATH)
+    try:
+        results = validator.validate_date_range(start_date, end_date)
+        
+        # Resumo estatístico
+        summary = {
+            "total_checked": len(results),
+            "pass": sum(1 for r in results if r.validation_status == "PASS"),
+            "warn": sum(1 for r in results if r.validation_status == "WARN"),
+            "fail": sum(1 for r in results if r.validation_status == "FAIL"),
+            "missing": sum(1 for r in results if "MISSING" in r.validation_status)
+        }
+        
+        return {"success": True, "summary": summary, "details_count": len(results)}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 # ============================================================================
 # MAIN

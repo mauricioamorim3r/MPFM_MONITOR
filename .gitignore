@@ -1,1 +1,10 @@
 node_modules
+__pycache__/
+*.pyc
+.venv/
+.env
+data/uploads/
+data/exports/
+*.db
+backend/mpfm.db
+tests/*.db
