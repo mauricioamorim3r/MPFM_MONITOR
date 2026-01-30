@@ -1,0 +1,35 @@
+# MPFM Monitor Backend - Python Dependencies
+
+# Web Framework
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+
+# Data Processing
+pandas>=2.1.0
+openpyxl>=3.1.0
+pdfplumber>=0.10.0
+python-multipart>=0.0.6
+
+# Database
+sqlite3-api>=2.0.0
+
+# Validation
+pydantic>=2.5.0
+email-validator>=2.1.0
+
+# XML Processing
+lxml>=5.0.0
+xmlschema>=2.5.0
+
+# Utilities
+python-dotenv>=1.0.0
+python-dateutil>=2.8.0
+aiofiles>=23.0.0
+
+# Development
+pytest>=7.4.0
+pytest-asyncio>=0.23.0
+httpx>=0.26.0
+
+# Production
+gunicorn>=21.0.0

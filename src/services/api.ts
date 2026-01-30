@@ -106,6 +106,49 @@ async function mockApiCall<T>(
 import type { Meter, CalibrationEvent, MassBalance, Alert } from '@/types'
 
 /**
+ * Configuração para backend real
+ */
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
+
+/**
+ * Cliente para backend FastAPI
+ */
+async function backendClient<T>(
+  endpoint: string,
+  options: RequestInit = {}
+): Promise<ApiResponse<T>> {
+  try {
+    const response = await fetch(`${BACKEND_URL}${endpoint}`, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...options.headers,
+      },
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      throw new Error(errorData.detail || `HTTP error! status: ${response.status}`)
+    }
+
+    const data = await response.json()
+    return { success: true, data, timestamp: new Date().toISOString() }
+  } catch (error) {
+    console.error(`[Backend] Error calling ${endpoint}:`, error)
+    // Fallback para API mock se backend não disponível
+    if (USE_MOCK) {
+      console.log('[Backend] Fallback para mock API')
+      return mockApiCall<T>(endpoint, options)
+    }
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Erro de conexão com backend',
+      timestamp: new Date().toISOString(),
+    }
+  }
+}
+
+/**
  * Medidores
  */
 export const metersApi = {
@@ -197,6 +240,156 @@ export const alertsApi = {
     apiClient<void>(`/alerts/${id}`, { method: 'DELETE' }),
 }
 
+// ============================================================================
+// ENDPOINTS BACKEND FASTAPI
+// ============================================================================
+
+export interface DailyMeasurement {
+  date: string
+  source: 'TOPSIDE' | 'SUBSEA' | 'SEPARATOR'
+  asset_tag: string
+  oil?: number
+  gas?: number
+  water?: number
+  hc?: number
+  total?: number
+  bsw?: number
+  k_oil?: number
+  k_gas?: number
+  k_water?: number
+}
+
+export interface ValidationResult {
+  variable_code: string
+  date_ref: string
+  asset_tag: string
+  excel_value?: number
+  pdf_value?: number
+  deviation_pct?: number
+  classification: 'CONSISTENTE' | 'ACEITAVEL' | 'INCONSISTENTE' | 'FONTE_UNICA' | 'SEM_DADOS'
+}
+
+export interface BackendAlert {
+  id: number
+  timestamp: string
+  meter_tag?: string
+  category: string
+  severity: 'critical' | 'warning' | 'info'
+  title: string
+  description: string
+  acknowledged: boolean
+  resolved: boolean
+}
+
+/**
+ * API do Backend FastAPI
+ */
+export const backendApi = {
+  // Status
+  status: () => backendClient<{ status: string; database: string; alerts_active: number }>('/api/status'),
+  health: () => backendClient<{ status: string }>('/api/health'),
+
+  // Medições Diárias
+  measurements: {
+    list: (params?: { start_date?: string; end_date?: string; source?: string }) => {
+      const query = new URLSearchParams()
+      if (params?.start_date) query.set('start_date', params.start_date)
+      if (params?.end_date) query.set('end_date', params.end_date)
+      if (params?.source) query.set('source', params.source)
+      return backendClient<DailyMeasurement[]>(`/api/measurements/daily?${query}`)
+    },
+    create: (measurement: DailyMeasurement) =>
+      backendClient<{ success: boolean; id: number }>('/api/measurements/daily', {
+        method: 'POST',
+        body: JSON.stringify(measurement),
+      }),
+    summary: (start_date?: string, end_date?: string) => {
+      const query = new URLSearchParams()
+      if (start_date) query.set('start_date', start_date)
+      if (end_date) query.set('end_date', end_date)
+      return backendClient<Record<string, unknown>[]>(`/api/measurements/summary?${query}`)
+    },
+  },
+
+  // Calibrações
+  calibrations: {
+    list: (asset_tag?: string) => {
+      const query = asset_tag ? `?asset_tag=${asset_tag}` : ''
+      return backendClient<Record<string, unknown>[]>(`/api/calibrations${query}`)
+    },
+    create: (calibration: Record<string, unknown>) =>
+      backendClient<{ success: boolean; id: number }>('/api/calibrations', {
+        method: 'POST',
+        body: JSON.stringify(calibration),
+      }),
+  },
+
+  // Alertas
+  alerts: {
+    list: (params?: { severity?: string; category?: string; resolved?: boolean }) => {
+      const query = new URLSearchParams()
+      if (params?.severity) query.set('severity', params.severity)
+      if (params?.category) query.set('category', params.category)
+      if (params?.resolved !== undefined) query.set('resolved', String(params.resolved))
+      return backendClient<BackendAlert[]>(`/api/alerts?${query}`)
+    },
+    active: () => backendClient<BackendAlert[]>('/api/alerts/active'),
+    create: (alert: Omit<BackendAlert, 'id' | 'timestamp' | 'acknowledged' | 'resolved'>) =>
+      backendClient<{ success: boolean; id: number }>('/api/alerts', {
+        method: 'POST',
+        body: JSON.stringify(alert),
+      }),
+    acknowledge: (id: number, userId: string) =>
+      backendClient<{ success: boolean }>(`/api/alerts/${id}/acknowledge?user_id=${userId}`, {
+        method: 'PUT',
+      }),
+    resolve: (id: number, note?: string) =>
+      backendClient<{ success: boolean }>(`/api/alerts/${id}/resolve${note ? `?note=${encodeURIComponent(note)}` : ''}`, {
+        method: 'PUT',
+      }),
+  },
+
+  // Validação Cruzada
+  validation: {
+    list: (params?: { start_date?: string; end_date?: string; classification?: string }) => {
+      const query = new URLSearchParams()
+      if (params?.start_date) query.set('start_date', params.start_date)
+      if (params?.end_date) query.set('end_date', params.end_date)
+      if (params?.classification) query.set('classification', params.classification)
+      return backendClient<ValidationResult[]>(`/api/validation/cross?${query}`)
+    },
+    summary: (date_ref: string) =>
+      backendClient<Record<string, unknown>>(`/api/validation/summary?date_ref=${date_ref}`),
+  },
+
+  // Upload
+  upload: async (file: File, fileType?: string): Promise<ApiResponse<{ success: boolean; records_extracted: number }>> => {
+    const formData = new FormData()
+    formData.append('file', file)
+    if (fileType) formData.append('file_type', fileType)
+
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/upload`, {
+        method: 'POST',
+        body: formData,
+      })
+      const data = await response.json()
+      return { success: true, data }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Erro ao fazer upload',
+      }
+    }
+  },
+
+  // Exportação
+  export: {
+    dailyReport: (date_ref: string, format: 'json' | 'csv' | 'excel' = 'json') =>
+      backendClient<Record<string, unknown>>(`/api/export/daily-report?date_ref=${date_ref}&format=${format}`),
+  },
+}
+
 /**
  * Exportar API unificada
  */
@@ -205,6 +398,7 @@ export const api = {
   calibration: calibrationApi,
   monitoring: monitoringApi,
   alerts: alertsApi,
+  backend: backendApi,
 }
 
 export default api
