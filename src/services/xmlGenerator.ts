@@ -15,9 +15,15 @@ export type XMLType = '001' | '002' | '003' | '004';
 export interface XMLGeneratorConfig {
   cnpjOperador: string;
   codigoInstalacao: string;
-  encoding: 'UTF-8' | 'ISO-8859-1';
+  encoding: 'ISO-8859-1' | 'UTF-8'; // ISO-8859-1 default conforme ANP
   validateBeforeGenerate: boolean;
 }
+
+// ============================================================================
+// TEMPLATES XML (PADRÃO V2)
+// ============================================================================
+
+const XML_HEADER_ISO = '<?xml version="1.0" encoding="ISO-8859-1"?>';
 
 export interface DadosBasicos {
   numSerieElementoPrimario: string;
@@ -214,7 +220,7 @@ export class ANPXMLGenerator {
       };
     }
 
-    const xml = `${XML_DECLARATION.replace('{encoding}', this.config.encoding)}
+    const xml = `${XML_HEADER_ISO}
 <a001>
   <LISTA_DADOS_BASICOS>
     <DADOS_BASICOS>
@@ -281,7 +287,7 @@ export class ANPXMLGenerator {
       };
     }
 
-    const xml = `${XML_DECLARATION.replace('{encoding}', this.config.encoding)}
+    const xml = `${XML_HEADER_ISO}
 <a002>
   <LISTA_DADOS_BASICOS>
     <DADOS_BASICOS>
@@ -587,7 +593,7 @@ export function createXMLGenerator(cnpj: string, codInstalacao: string): ANPXMLG
   return new ANPXMLGenerator({
     cnpjOperador: cnpj,
     codigoInstalacao: codInstalacao,
-    encoding: 'UTF-8',
+    encoding: 'ISO-8859-1',
     validateBeforeGenerate: true
   });
 }

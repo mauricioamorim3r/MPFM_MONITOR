@@ -13,7 +13,11 @@ from enum import Enum
 import sqlite3
 import json
 import os
+import zipfile
+import tempfile
+import hashlib
 from pathlib import Path
+import re
 
 # ============================================================================
 # CONFIGURAÇÃO
@@ -58,7 +62,12 @@ class FileType(str, Enum):
     PDF_SUBSEA = "PDF_SUBSEA"
     PDF_SEPARATOR = "PDF_SEPARATOR"
     PDF_CALIBRATION = "PDF_CALIBRATION"
+    MPFM_HOURLY = "MPFM_HOURLY"
+    MPFM_DAILY = "MPFM_DAILY"
+    PVT_CALIB = "PVT_CALIB"
     XML_ANP = "XML_ANP"
+    ZIP_BATCH = "ZIP_BATCH"
+    UNKNOWN = "UNKNOWN"
 
 class SourceType(str, Enum):
     TOPSIDE = "TOPSIDE"
@@ -254,7 +263,9 @@ def init_database():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS staged_file (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            batch_id TEXT,
             file_name TEXT NOT NULL,
+            original_path TEXT,
             file_type TEXT NOT NULL,
             file_size INTEGER,
             file_hash TEXT,
@@ -263,6 +274,44 @@ def init_database():
             warnings TEXT,
             errors TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # --- NOVAS TABELAS V2 (Modelo Normalizado) ---
+
+    # Fatos Horários (MPFM Hourly)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS fact_mpfm_hourly (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            meter_tag TEXT NOT NULL,
+            period_end TIMESTAMP NOT NULL,
+            period_start TIMESTAMP,
+            phase TEXT,
+            uncorrected_mass REAL,
+            corrected_mass REAL,
+            pvt_ref_mass REAL,
+            pvt_ref_vol REAL,
+            avg_pressure REAL,
+            avg_temp REAL,
+            avg_density REAL,
+            source_file_id INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(meter_tag, period_end, phase)
+        )
+    """)
+
+    # Matriz de Completude (Completeness Matrix)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS fact_completeness (
+            date_ref DATE NOT NULL,
+            meter_tag TEXT NOT NULL,
+            expected_hourly INTEGER DEFAULT 24,
+            found_hourly INTEGER DEFAULT 0,
+            has_daily INTEGER DEFAULT 0,
+            missing_hours TEXT,
+            status TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (date_ref, meter_tag)
         )
     """)
     
@@ -699,52 +748,50 @@ async def upload_file(
         with open(file_path, "wb") as f:
             content = await file.read()
             f.write(content)
-        
-        # Detecta tipo se não informado
-        if not file_type:
-            file_type = detect_file_type(file.filename)
-        
-        # Registra no banco
-        cursor = conn.cursor()
-        cursor.execute("""
-            INSERT INTO staged_file (file_name, file_type, file_size, parse_status)
-            VALUES (?, ?, ?, 'PENDING')
-        """, (file.filename, file_type.value if file_type else "UNKNOWN", len(content)))
-        conn.commit()
-        
-        # TODO: Processar arquivo em background
-        
-        return UploadResponse(
-            success=True,
-            file_name=file.filename,
-            file_type=file_type or FileType.EXCEL_DAILY,
-            records_extracted=0,
-            warnings=["Arquivo recebido, processamento em andamento"],
-            errors=[]
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+
+    # 2. Classificação
+    file_type = classify_file(file.filename)
+    
+    # 3. Hash e Batch ID
+    file_hash = hashlib.sha256(content).hexdigest()
+    batch_id = f"BATCH_{timestamp}" if file_type == FileType.ZIP_BATCH else None
+    
+    # 4. Registrar Staging
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO staged_file 
+        (batch_id, file_name, file_type, file_size, file_hash, parse_status)
+        VALUES (?, ?, ?, ?, ?, 'PENDING')
+    """, (batch_id, file.filename, file_type, len(content), file_hash))
+    
+    file_id = cursor.lastrowid
+    conn.commit()
+    
+    extracted_count = 0
+    warnings = []
+    
+    # 5. Processamento específico
+    if file_type == FileType.ZIP_BATCH:
+        try:
+            process_zip_upload(file_path, batch_id, conn)
+            extracted_count = -1 # Indica batch
+        except Exception as e:
+            cursor.execute("UPDATE staged_file SET parse_status = 'ERROR', errors = ? WHERE id = ?", (str(e), file_id))
+            conn.commit()
+            raise HTTPException(status_code=500, detail=f"Erro processando ZIP: {str(e)}")
+
+    return UploadResponse(
+        success=True,
+        file_name=file.filename,
+        file_type=file_type,
+        records_extracted=extracted_count,
+        warnings=warnings,
+        errors=[]
+    )
 
 def detect_file_type(filename: str) -> Optional[FileType]:
-    """Detecta tipo de arquivo pelo nome."""
-    upper = filename.upper()
-    
-    if upper.endswith(".XLSX") or upper.endswith(".XLS"):
-        return FileType.EXCEL_DAILY
-    elif upper.endswith(".PDF"):
-        if "B03" in upper or "TOPSIDE" in upper:
-            return FileType.PDF_TOPSIDE
-        elif "B05" in upper or "SUBSEA" in upper:
-            return FileType.PDF_SUBSEA
-        elif "SEP" in upper:
-            return FileType.PDF_SEPARATOR
-        elif "CALIB" in upper or "PVT" in upper:
-            return FileType.PDF_CALIBRATION
-        return FileType.PDF_TOPSIDE
-    elif upper.endswith(".XML"):
-        return FileType.XML_ANP
-    
-    return None
+    # Deprecated: use classify_file instead
+    return classify_file(filename)
 
 # ============================================================================
 # ENDPOINTS - EXPORTAÇÃO
